@@ -32,7 +32,7 @@ export function TaskList({ kind, title, subtitle, tasks, inputRef, onAdd, onUpda
         </span>
       </header>
       <QuickInput
-        placeholder={kind === "daily" ? "오늘 할 일 입력 후 Enter" : "이번 주 할 일 입력 후 Enter"}
+        placeholder={kind === "daily" ? "오늘 할 일 입력 후 +" : "이번 주 할 일 입력 후 +"}
         ref={inputRef}
         onSubmit={(text) => onAdd(kind, text)}
       />

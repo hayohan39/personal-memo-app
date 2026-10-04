@@ -96,4 +96,25 @@ describe.skipIf(!url)("memo 데이터 계층 (실제 DB)", () => {
     await memo.deleteGroup(group.id);
     expect((await memo.listBlocks()).some((b) => b.id === block!.id)).toBe(false);
   });
+
+  it("loadState: 이월을 한 번에 처리하고 블록과 항목을 함께 돌려준다", async () => {
+    const day = kst("2026-11-02T09:00:00"); // 월요일
+    await memo.createTask("daily", "어제 못 한 일", kst("2026-11-01T09:00:00"));
+    await memo.createTask("weekly", "지난주 못 한 일", kst("2026-10-28T09:00:00"));
+    const group = await memo.createGroup("load");
+    const block = await memo.createBlock(group.id, "b");
+    await memo.createItem(block!.id, "첫째");
+    await memo.createItem(block!.id, "둘째");
+
+    const state = await memo.loadState(day);
+    expect(state.today).toBe("2026-11-02");
+    expect(state.weekStart).toBe("2026-11-02");
+    expect(state.daily.find((t) => t.text === "어제 못 한 일")).toMatchObject({ periodStart: "2026-11-02" });
+    expect(state.weekly.find((t) => t.text === "지난주 못 한 일")).toMatchObject({ periodStart: "2026-11-02" });
+    expect(state.daily.every((t) => t.kind === "daily")).toBe(true);
+    const loaded = state.blocks.find((b) => b.id === block!.id);
+    expect(loaded?.items.map((i) => i.text)).toEqual(["첫째", "둘째"]);
+    expect(typeof loaded?.items[0].id).toBe("number");
+    expect(state.blocks.find((b) => b.groupId === group.id && b.id !== block!.id)).toBeUndefined();
+  });
 });

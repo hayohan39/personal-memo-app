@@ -12,7 +12,7 @@ type Props = {
   label: string;
 };
 
-/** 누르면 바로 고칠 수 있는 텍스트. Enter 저장 · Shift+Enter 줄바꿈 · Esc 취소. */
+/** 누르면 바로 고칠 수 있는 텍스트. Enter 줄바꿈 · 다른 곳을 누르거나 Ctrl(⌘)+Enter 로 저장 · Esc 취소. */
 export function EditableText({ value, onSave, onEmpty, className, label }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -67,7 +67,7 @@ export function EditableText({ value, onSave, onEmpty, className, label }: Props
       }}
       onBlur={commit}
       onKeyDown={(e) => {
-        if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) {
           e.preventDefault();
           commit();
         } else if (e.key === "Escape") {
