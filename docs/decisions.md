@@ -19,7 +19,7 @@
 
 ---
 
-## {{CREATED_AT}} 기본 스택
+## 2026-10-04 기본 스택
 
 - 결정: Next.js(App Router) + TypeScript, Vercel 배포, Neon Postgres(`pg` + SQL 마이그레이션)
 - 이유: project-bootstrap 템플릿의 고정 스택. 무료 한도 안에서 프로젝트를 계속 찍어낼 수 있다.

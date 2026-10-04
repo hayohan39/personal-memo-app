@@ -1,14 +1,8 @@
 @AGENTS.md
 
-<!-- template-only:start -->
-> **여기는 템플릿 리포지토리(project-bootstrap)다.** 아래 내용은 이 템플릿으로 만든
-> 프로젝트용이다. 템플릿 자체를 고칠 때는 `docs/bootstrap/MAINTAINING.md` 를 먼저 읽는다.
-> 새 프로젝트를 만들어 달라는 요청이면 `new-project` 스킬을 따른다.
-<!-- template-only:end -->
+# personal-memo-app
 
-# {{PROJECT_NAME}}
-
-{{PROJECT_DESCRIPTION}}
+Claude 개발 todo 블록 정리와 일간/주간 todo 관리를 위한 개인 메모장
 
 개인 미니 프로젝트다. 리포지토리 주인(이하 "사용자")은 Claude 세션에서 개발을 요청하고
 진행 상황을 묻고, GitHub 에서 PR 을 리뷰해 merge 한다. 커밋과 PR 은 Claude 가 만든다.
