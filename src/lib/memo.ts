@@ -103,15 +103,17 @@ type BlockRow = Omit<Block, "items">;
 const BLOCK_COLUMNS = `id::int, group_id::int as "groupId", title, updated_at as "updatedAt"`;
 
 export async function listBlocks(): Promise<Block[]> {
-  const blocks = await query<BlockRow>(`select ${BLOCK_COLUMNS} from prompt_blocks order by created_at desc, id desc`);
-  const items = await query<Item & { blockId: number }>(
-    `select id::int, block_id::int as "blockId", text from prompt_items order by position, id`,
+  // 항목까지 한 번에 가져온다(DB 왕복 1회).
+  const rows = await query<BlockRow & { items: Item[] }>(
+    `select b.id::int, b.group_id::int as "groupId", b.title, b.updated_at as "updatedAt",
+            coalesce(json_agg(json_build_object('id', i.id, 'text', i.text) order by i.position, i.id)
+                     filter (where i.id is not null), '[]') as items
+     from prompt_blocks b
+     left join prompt_items i on i.block_id = b.id
+     group by b.id
+     order by b.created_at desc, b.id desc`,
   );
-  return blocks.map((b) => ({
-    ...b,
-    updatedAt: new Date(b.updatedAt).toISOString(),
-    items: items.filter((i) => i.blockId === b.id).map(({ id, text }) => ({ id, text })),
-  }));
+  return rows.map((b) => ({ ...b, updatedAt: new Date(b.updatedAt).toISOString() }));
 }
 
 export async function createBlock(groupId: number, title = ""): Promise<Block | null> {
@@ -140,55 +142,77 @@ export async function deleteBlock(id: number): Promise<void> {
   await query("delete from prompt_blocks where id = $1", [id]);
 }
 
-async function touchBlock(blockId: number): Promise<void> {
-  await query("update prompt_blocks set updated_at = now() where id = $1", [blockId]);
-}
-
+// 항목을 바꾸면 블록의 updated_at 도 같은 문장에서 갱신한다(DB 왕복 1회).
 export async function createItem(blockId: number, text: string): Promise<Item | null> {
   const [item] = await query<Item>(
-    `insert into prompt_items (block_id, text, position)
-     select id, $2, (select coalesce(max(position), 0) + 1 from prompt_items where block_id = $1)
-     from prompt_blocks where id = $1
-     returning id::int, text`,
+    `with ins as (
+       insert into prompt_items (block_id, text, position)
+       select id, $2, (select coalesce(max(position), 0) + 1 from prompt_items where block_id = $1)
+       from prompt_blocks where id = $1
+       returning id, text, block_id
+     ), touch as (
+       update prompt_blocks set updated_at = now() where id in (select block_id from ins)
+     )
+     select id::int, text from ins`,
     [blockId, text],
   );
-  if (item) await touchBlock(blockId);
   return item ?? null;
 }
 
 export async function updateItem(id: number, text: string): Promise<Item | null> {
-  const [item] = await query<Item & { blockId: number }>(
-    `update prompt_items set text = $2 where id = $1 returning id::int, text, block_id::int as "blockId"`,
+  const [item] = await query<Item>(
+    `with upd as (
+       update prompt_items set text = $2 where id = $1 returning id, text, block_id
+     ), touch as (
+       update prompt_blocks set updated_at = now() where id in (select block_id from upd)
+     )
+     select id::int, text from upd`,
     [id, text],
   );
-  if (!item) return null;
-  await touchBlock(item.blockId);
-  return { id: item.id, text: item.text };
+  return item ?? null;
 }
 
 export async function deleteItem(id: number): Promise<void> {
-  const rows = await query<{ blockId: number }>(
-    `delete from prompt_items where id = $1 returning block_id::int as "blockId"`,
+  await query(
+    `with del as (
+       delete from prompt_items where id = $1 returning block_id
+     )
+     update prompt_blocks set updated_at = now() where id in (select block_id from del)`,
     [id],
   );
-  if (rows[0]) await touchBlock(rows[0].blockId);
 }
 
 // ── 전체 ─────────────────────────────────────────────────
 
+/** 일간·주간 이월을 한 문장으로 처리한다. */
+async function rolloverAll(today: string, weekStart: string): Promise<void> {
+  await query(
+    `update tasks set period_start = case kind when 'daily' then $1::date else $2::date end
+     where not done and period_start < case kind when 'daily' then $1::date else $2::date end`,
+    [today, weekStart],
+  );
+}
+
 export async function loadState(now: Date): Promise<MemoState> {
-  const [groups, blocks, daily, weekly] = await Promise.all([
+  const today = currentPeriod("daily", now);
+  const weekStart = currentPeriod("weekly", now);
+  await rolloverAll(today, weekStart);
+  const [groups, blocks, tasks] = await Promise.all([
     listGroups(),
     listBlocks(),
-    listTasks("daily", now),
-    listTasks("weekly", now),
+    query<Task>(
+      `select ${TASK_COLUMNS} from tasks
+       where (kind = 'daily' and period_start = $1) or (kind = 'weekly' and period_start = $2)
+       order by position, id`,
+      [today, weekStart],
+    ),
   ]);
   return {
     groups,
     blocks,
-    daily,
-    weekly,
-    today: currentPeriod("daily", now),
-    weekStart: currentPeriod("weekly", now),
+    daily: tasks.filter((t) => t.kind === "daily"),
+    weekly: tasks.filter((t) => t.kind === "weekly"),
+    today,
+    weekStart,
   };
 }

@@ -115,8 +115,7 @@ export function BlockCard(props: Props) {
 
       <QuickInput
         ref={inputRef}
-        multiline
-        placeholder="항목 추가 (줄바꿈은 Shift+Enter)"
+        placeholder="항목 입력 후 +"
         onSubmit={props.onAddItem}
       />
 
