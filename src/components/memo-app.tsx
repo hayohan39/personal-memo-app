@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { logout } from "@/app/login/actions";
-import type { Block, Group, Item, MemoState, Task } from "@/lib/memo";
+import type { Block, Group, Item, MemoState, Note, Task } from "@/lib/memo";
 import { formatDay, formatWeek, type TaskKind } from "@/lib/period";
 import { GROUP_COOKIE, TAB_COOKIE, type Tab } from "@/lib/prefs";
 import { api, copyText } from "./client";
-import { PromptBoard, type BoardActions } from "./prompt-board";
+import { MonthCalendar } from "./month-calendar";
+import { NotesBoard, type NoteActions } from "./notes-board";
+import { ProjectBoard, type BoardActions } from "./project-board";
 import { TaskList } from "./task-list";
 
 function remember(name: string, value: string) {
@@ -129,6 +131,21 @@ export function MemoApp({ initial, initialTab, initialGroup }: Props) {
     setState((s) => mapTasks(s, task.kind, (ts) => ts.map((t) => (t.id === task.id ? { ...t, ...patch } : t))));
     enqueue(() => api("PATCH", `/api/tasks/${realId(task.id)}`, patch));
   };
+  /** 일간 ↔ 주간. 옮긴 쪽의 현재 기간(오늘 / 이번 주) 맨 아래로 간다. */
+  const moveTask = (task: Task) => {
+    const to: TaskKind = task.kind === "daily" ? "weekly" : "daily";
+    setState((s) => {
+      const period = to === "daily" ? s.today : s.weekStart;
+      const moved: Task = { ...task, kind: to, periodStart: period, firstPeriod: period };
+      return mapTasks(
+        mapTasks(s, task.kind, (ts) => ts.filter((t) => t.id !== task.id)),
+        to,
+        (ts) => [...ts, moved],
+      );
+    });
+    show(to === "daily" ? "오늘 할 일로 옮겼어요" : "이번 주 할 일로 옮겼어요");
+    enqueue(() => api("PATCH", `/api/tasks/${realId(task.id)}`, { kind: to }));
+  };
   const deleteTask = (task: Task) => {
     setState((s) => mapTasks(s, task.kind, (ts) => ts.filter((t) => t.id !== task.id)));
     enqueue(() => api("DELETE", `/api/tasks/${realId(task.id)}`));
@@ -143,13 +160,13 @@ export function MemoApp({ initial, initialTab, initialGroup }: Props) {
   const actions: BoardActions = {
     createGroup: (name) => {
       const id = nextTempId();
-      setState((s) => ({ ...s, groups: [...s.groups, { id, name }] }));
+      setState((s) => ({ ...s, groups: [...s.groups, { id, name, prefix: "", suffix: "" }] }));
       enqueue(() => api<Group>("POST", "/api/groups", { name }).then(created(id)));
       selectGroup(id);
     },
-    renameGroup: (id, name) => {
-      setState((s) => ({ ...s, groups: s.groups.map((g) => (g.id === id ? { ...g, name } : g)) }));
-      enqueue(() => api("PATCH", `/api/groups/${realId(id)}`, { name }));
+    updateGroup: (id, patch) => {
+      setState((s) => ({ ...s, groups: s.groups.map((g) => (g.id === id ? { ...g, ...patch } : g)) }));
+      enqueue(() => api("PATCH", `/api/groups/${realId(id)}`, patch));
     },
     deleteGroup: (id) => {
       const rest = state.groups.filter((g) => g.id !== id);
@@ -163,7 +180,7 @@ export function MemoApp({ initial, initialTab, initialGroup }: Props) {
     },
     createBlock: (groupId) => {
       const id = nextTempId();
-      const block: Block = { id, groupId, title: "", updatedAt: new Date().toISOString(), items: [] };
+      const block: Block = { id, groupId, title: "", useWrap: true, updatedAt: new Date().toISOString(), items: [] };
       setState((s) => ({ ...s, blocks: [block, ...s.blocks] }));
       setFocusBlockId(id);
       enqueue(() => api<Block>("POST", "/api/blocks", { groupId: realId(groupId) }).then(created(id)));
@@ -200,6 +217,28 @@ export function MemoApp({ initial, initialTab, initialGroup }: Props) {
       copyText(text)
         .then(() => show("복사했어요"))
         .catch(() => show("복사하지 못했어요", true)),
+    notify: (text) => show(text),
+  };
+
+  // ── 메모 ──
+  const mapNotes = (s: MemoState, fn: (notes: Note[]) => Note[]): MemoState => ({ ...s, notes: fn(s.notes) });
+  const noteActions: NoteActions = {
+    create: () => {
+      const id = nextTempId();
+      const note: Note = { id, title: "", body: "", updatedAt: new Date().toISOString() };
+      setState((s) => mapNotes(s, (ns) => [note, ...ns]));
+      enqueue(() => api<Note>("POST", "/api/notes", {}).then(created(id)));
+      return id;
+    },
+    update: (id, patch) => {
+      const updatedAt = new Date().toISOString();
+      setState((s) => mapNotes(s, (ns) => ns.map((n) => (n.id === id ? { ...n, ...patch, updatedAt } : n))));
+      enqueue(() => api("PATCH", `/api/notes/${realId(id)}`, patch));
+    },
+    remove: (id) => {
+      setState((s) => mapNotes(s, (ns) => ns.filter((n) => n.id !== id)));
+      enqueue(() => api("DELETE", `/api/notes/${realId(id)}`));
+    },
   };
 
   const left = state.daily.filter((t) => !t.done).length + state.weekly.filter((t) => !t.done).length;
@@ -217,17 +256,27 @@ export function MemoApp({ initial, initialTab, initialGroup }: Props) {
         </form>
       </header>
 
+      {/* 휴대폰: 세 화면을 탭으로 전환. 넓은 화면: 할 일은 왼쪽에 고정, 오른쪽에서 프로젝트/메모 전환 */}
       <nav className="tabs" aria-label="화면 선택">
-        <button type="button" aria-pressed={tab === "todo"} onClick={() => selectTab("todo")}>
+        <button type="button" data-for="todo" aria-pressed={tab === "todo"} onClick={() => selectTab("todo")}>
           할 일 {left > 0 ? <span className="tab-count">{left}</span> : null}
         </button>
-        <button type="button" aria-pressed={tab === "prompts"} onClick={() => selectTab("prompts")}>
-          프롬프트 블록
+        <button
+          type="button"
+          data-for="prompts"
+          aria-pressed={tab === "prompts"}
+          onClick={() => selectTab("prompts")}
+        >
+          프로젝트
+        </button>
+        <button type="button" data-for="notes" aria-pressed={tab === "notes"} onClick={() => selectTab("notes")}>
+          메모
         </button>
       </nav>
 
       <div className="panes">
         <div className="pane pane-todo">
+          <MonthCalendar today={state.today} weekStart={state.weekStart} />
           <TaskList
             kind="daily"
             title="오늘"
@@ -237,6 +286,7 @@ export function MemoApp({ initial, initialTab, initialGroup }: Props) {
             onAdd={addTask}
             onUpdate={updateTask}
             onDelete={deleteTask}
+            onMove={moveTask}
           />
           <TaskList
             kind="weekly"
@@ -246,10 +296,11 @@ export function MemoApp({ initial, initialTab, initialGroup }: Props) {
             onAdd={addTask}
             onUpdate={updateTask}
             onDelete={deleteTask}
+            onMove={moveTask}
           />
         </div>
         <div className="pane pane-prompts">
-          <PromptBoard
+          <ProjectBoard
             groups={state.groups}
             blocks={state.blocks}
             selected={selectedGroup}
@@ -257,6 +308,9 @@ export function MemoApp({ initial, initialTab, initialGroup }: Props) {
             focusBlockId={focusBlockId}
             actions={actions}
           />
+        </div>
+        <div className="pane pane-notes">
+          <NotesBoard notes={state.notes} actions={noteActions} />
         </div>
       </div>
 

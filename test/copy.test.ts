@@ -18,3 +18,16 @@ describe("formatBlock", () => {
     expect(formatBlock(" ", ["", "  하나 "])).toBe("하나");
   });
 });
+
+describe("formatBlock 앞뒤 문구", () => {
+  it("앞·뒤 문구를 빈 줄로 띄워 붙인다", () => {
+    expect(formatBlock("제목", ["a", "b"], { prefix: "지시\n설명 ", suffix: " 추가 요청" })).toBe(
+      "지시\n설명\n\n제목\n\n1. a\n2. b\n\n추가 요청",
+    );
+  });
+
+  it("비어 있는 쪽은 빼고 붙인다", () => {
+    expect(formatBlock("", ["a"], { prefix: "", suffix: "끝" })).toBe("a\n\n끝");
+    expect(formatBlock("", ["a"], { prefix: "  ", suffix: "" })).toBe("a");
+  });
+});

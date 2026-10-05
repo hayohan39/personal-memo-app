@@ -12,7 +12,7 @@ export class HttpError extends Error {
   }
 }
 
-const MAX_TEXT = 20_000;
+const MAX_TEXT = 200_000; // 메모 본문이 길 수 있다
 
 export async function isAuthenticated(): Promise<boolean> {
   const store = await cookies();

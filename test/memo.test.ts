@@ -117,4 +117,41 @@ describe.skipIf(!url)("memo 데이터 계층 (실제 DB)", () => {
     expect(typeof loaded?.items[0].id).toBe("number");
     expect(state.blocks.find((b) => b.groupId === group.id && b.id !== block!.id)).toBeUndefined();
   });
+
+  it("할 일을 일간 ↔ 주간으로 옮기면 그쪽의 현재 기간으로 간다", async () => {
+    const wed = kst("2026-11-11T10:00:00"); // 수요일, 주 시작은 11-09
+    const t = await memo.createTask("daily", "옮길 일", wed);
+    const toWeekly = await memo.moveTask(t.id, "weekly", wed);
+    expect(toWeekly).toMatchObject({ kind: "weekly", periodStart: "2026-11-09", firstPeriod: "2026-11-09" });
+    const back = await memo.moveTask(t.id, "daily", wed);
+    expect(back).toMatchObject({ kind: "daily", periodStart: "2026-11-11" });
+    expect(await memo.moveTask(999_999, "daily", wed)).toBeNull();
+  });
+
+  it("프로젝트 앞·뒤 문구와 블록 useWrap 을 저장한다", async () => {
+    const group = await memo.createGroup("wrap");
+    expect(group).toMatchObject({ prefix: "", suffix: "" });
+    expect(await memo.updateGroup(group.id, { prefix: "앞" })).toMatchObject({ name: "wrap", prefix: "앞", suffix: "" });
+    expect(await memo.updateGroup(group.id, { suffix: "뒤", name: "wrap2" })).toMatchObject({
+      name: "wrap2",
+      prefix: "앞",
+      suffix: "뒤",
+    });
+    const block = await memo.createBlock(group.id);
+    expect(block?.useWrap).toBe(true);
+    await memo.updateBlock(block!.id, { useWrap: false });
+    expect((await memo.listBlocks()).find((b) => b.id === block!.id)?.useWrap).toBe(false);
+  });
+
+  it("메모를 만들고 고치고 지운다. 최근에 고친 것이 먼저 온다", async () => {
+    const a = await memo.createNote("a", "");
+    const b = await memo.createNote("", "본문");
+    await memo.updateNote(a.id, { body: "나중에 고침" });
+    const list = await memo.listNotes();
+    expect(list.slice(0, 2).map((n) => n.id)).toEqual([a.id, b.id]);
+    expect(list[0]).toMatchObject({ title: "a", body: "나중에 고침" });
+    await memo.deleteNote(b.id);
+    expect((await memo.listNotes()).some((n) => n.id === b.id)).toBe(false);
+    expect(await memo.updateNote(b.id, { title: "x" })).toBeNull();
+  });
 });
