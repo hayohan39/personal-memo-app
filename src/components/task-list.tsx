@@ -15,9 +15,11 @@ type Props = {
   onAdd: (kind: TaskKind, text: string) => void;
   onUpdate: (task: Task, patch: { text?: string; done?: boolean }) => void;
   onDelete: (task: Task) => void;
+  /** 일간 ↔ 주간으로 옮긴다. */
+  onMove: (task: Task) => void;
 };
 
-export function TaskList({ kind, title, subtitle, tasks, inputRef, onAdd, onUpdate, onDelete }: Props) {
+export function TaskList({ kind, title, subtitle, tasks, inputRef, onAdd, onUpdate, onDelete, onMove }: Props) {
   // 미완료가 위, 완료는 아래로.
   const sorted = [...tasks.filter((t) => !t.done), ...tasks.filter((t) => t.done)];
   const left = tasks.filter((t) => !t.done).length;
@@ -61,6 +63,14 @@ export function TaskList({ kind, title, subtitle, tasks, inputRef, onAdd, onUpda
                     {carry}
                   </span>
                 ) : null}
+                <button
+                  type="button"
+                  className="move-btn"
+                  title={kind === "daily" ? "이번 주 할 일로 옮기기" : "오늘 할 일로 옮기기"}
+                  onClick={() => onMove(task)}
+                >
+                  {kind === "daily" ? "→ 주간" : "→ 오늘"}
+                </button>
                 <button type="button" className="icon-btn" aria-label="삭제" onClick={() => onDelete(task)}>
                   ×
                 </button>

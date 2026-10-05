@@ -19,7 +19,8 @@ export default async function Home() {
   }
 
   const store = await cookies();
-  const tab = store.get(TAB_COOKIE)?.value === "prompts" ? "prompts" : "todo";
+  const savedTab = store.get(TAB_COOKIE)?.value;
+  const tab = savedTab === "prompts" || savedTab === "notes" ? savedTab : "todo";
   const group = Number(store.get(GROUP_COOKIE)?.value) || null;
 
   return <MemoApp initial={await loadState(new Date())} initialTab={tab} initialGroup={group} />;

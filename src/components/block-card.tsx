@@ -8,9 +8,12 @@ import { QuickInput } from "./quick-input";
 
 type Props = {
   block: Block;
+  /** 블록이 속한 프로젝트(앞·뒤 문구) */
+  group: Group;
   groups: Group[];
   focus: boolean;
   onTitle: (title: string) => void;
+  onUseWrap: (useWrap: boolean) => void;
   onMove: (groupId: number) => void;
   onDelete: () => void;
   onAddItem: (text: string) => void;
@@ -29,7 +32,9 @@ const timeFormat = new Intl.DateTimeFormat("ko-KR", {
 });
 
 export function BlockCard(props: Props) {
-  const { block, groups, focus } = props;
+  const { block, group, groups, focus } = props;
+  const hasWrap = Boolean(group.prefix.trim() || group.suffix.trim());
+  const wrap = hasWrap && block.useWrap ? { prefix: group.prefix, suffix: group.suffix } : undefined;
   const [title, setTitle] = useState(block.title);
   const saved = useRef(block.title);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -48,7 +53,7 @@ export function BlockCard(props: Props) {
   };
   useEffect(() => () => clearTimeout(timer.current), []);
 
-  const copyAll = () => props.onCopy(formatBlock(title, block.items.map((i) => i.text)));
+  const copyAll = () => props.onCopy(formatBlock(title, block.items.map((i) => i.text), wrap));
 
   return (
     <article className="card block">
@@ -74,7 +79,7 @@ export function BlockCard(props: Props) {
           className="btn primary copy"
           onClick={copyAll}
           disabled={block.items.length === 0}
-          title="블록 전체를 번호 목록으로 복사"
+          title={wrap ? "앞 문구 + 블록 + 뒤 문구를 복사" : "블록 전체를 번호 목록으로 복사"}
         >
           전체 복사
         </button>
@@ -124,17 +129,28 @@ export function BlockCard(props: Props) {
           {block.items.length}개 · {timeFormat.format(new Date(block.updatedAt))}
         </span>
         <span className="spacer" />
+        {hasWrap ? (
+          <label className="wrap-toggle" title="전체 복사 때 프로젝트의 앞·뒤 문구를 붙여요">
+            <input type="checkbox" checked={block.useWrap} onChange={(e) => props.onUseWrap(e.target.checked)} />
+            앞뒤 문구
+          </label>
+        ) : null}
         {groups.length > 1 ? (
           <select
-            aria-label="다른 그룹으로 이동"
-            value={block.groupId}
-            onChange={(e) => props.onMove(Number(e.target.value))}
+            aria-label="다른 프로젝트로 옮기기"
+            value=""
+            onChange={(e) => {
+              if (e.target.value) props.onMove(Number(e.target.value));
+            }}
           >
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name}
-              </option>
-            ))}
+            <option value="">이동…</option>
+            {groups
+              .filter((g) => g.id !== block.groupId)
+              .map((g) => (
+                <option key={g.id} value={g.id}>
+                  → {g.name}
+                </option>
+              ))}
           </select>
         ) : null}
         <button
