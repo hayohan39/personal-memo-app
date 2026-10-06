@@ -4,10 +4,10 @@ import { currentPeriod, type TaskKind } from "@/lib/period";
 /** 프로젝트. prefix/suffix 는 블록을 전체 복사할 때 앞·뒤에 붙는 문구. (DB 테이블 이름은 prompt_groups) */
 export type Group = { id: number; name: string; prefix: string; suffix: string };
 export type Item = { id: number; text: string };
+/** 프롬프트 블록. 프로젝트마다 정확히 하나 있다. */
 export type Block = {
   id: number;
   groupId: number;
-  title: string;
   /** 전체 복사 때 프로젝트의 앞·뒤 문구를 붙일지 */
   useWrap: boolean;
   updatedAt: string;
@@ -106,14 +106,25 @@ export async function listGroups(): Promise<Group[]> {
   return query<Group>(`select ${GROUP_COLUMNS} from prompt_groups order by position, id`);
 }
 
-export async function createGroup(name: string): Promise<Group> {
-  const [group] = await query<Group>(
-    `insert into prompt_groups (name, position)
-     values ($1, (select coalesce(max(position), 0) + 1 from prompt_groups))
-     returning ${GROUP_COLUMNS}`,
+/** 프로젝트와 그 블록을 함께 만든다. */
+export async function createGroup(name: string): Promise<{ group: Group; block: Block }> {
+  const [row] = await query<Group & { blockId: number; blockUpdatedAt: string }>(
+    `with g as (
+       insert into prompt_groups (name, position)
+       values ($1, (select coalesce(max(position), 0) + 1 from prompt_groups))
+       returning id, name, prefix, suffix
+     ), b as (
+       insert into prompt_blocks (group_id) select id from g returning id, updated_at
+     )
+     select g.id::int, g.name, g.prefix, g.suffix, b.id::int as "blockId", b.updated_at as "blockUpdatedAt"
+     from g, b`,
     [name],
   );
-  return group;
+  const { blockId, blockUpdatedAt, ...group } = row;
+  return {
+    group,
+    block: { id: blockId, groupId: group.id, useWrap: true, updatedAt: new Date(blockUpdatedAt).toISOString(), items: [] },
+  };
 }
 
 export async function updateGroup(
@@ -137,50 +148,38 @@ export async function deleteGroup(id: number): Promise<void> {
 }
 
 type BlockRow = Omit<Block, "items">;
-const BLOCK_COLUMNS = `id::int, group_id::int as "groupId", title, use_wrap as "useWrap", updated_at as "updatedAt"`;
 
 export async function listBlocks(): Promise<Block[]> {
   // 항목까지 한 번에 가져온다(DB 왕복 1회).
   const rows = await query<BlockRow & { items: Item[] }>(
-    `select b.id::int, b.group_id::int as "groupId", b.title, b.use_wrap as "useWrap", b.updated_at as "updatedAt",
+    `select b.id::int, b.group_id::int as "groupId", b.use_wrap as "useWrap", b.updated_at as "updatedAt",
             coalesce(json_agg(json_build_object('id', i.id, 'text', i.text) order by i.position, i.id)
                      filter (where i.id is not null), '[]') as items
      from prompt_blocks b
      left join prompt_items i on i.block_id = b.id
      group by b.id
-     order by b.created_at desc, b.id desc`,
+     order by b.group_id`,
   );
   return rows.map((b) => ({ ...b, updatedAt: new Date(b.updatedAt).toISOString() }));
 }
 
-export async function createBlock(groupId: number, title = ""): Promise<Block | null> {
-  const [block] = await query<BlockRow>(
-    `insert into prompt_blocks (group_id, title)
-     select id, $2 from prompt_groups where id = $1
-     returning ${BLOCK_COLUMNS}`,
-    [groupId, title],
-  );
-  return block ? { ...block, updatedAt: new Date(block.updatedAt).toISOString(), items: [] } : null;
-}
-
-export async function updateBlock(
-  id: number,
-  patch: { title?: string; groupId?: number; useWrap?: boolean },
-): Promise<boolean> {
+/** 블록 설정(앞·뒤 문구를 붙일지). 블록 자체는 프로젝트와 함께 생기고 지워진다. */
+export async function updateBlock(id: number, patch: { useWrap?: boolean }): Promise<boolean> {
   const rows = await query(
-    `update prompt_blocks set
-       title = coalesce($2, title),
-       group_id = coalesce((select id from prompt_groups where id = $3), group_id),
-       use_wrap = coalesce($4, use_wrap),
-       updated_at = now()
-     where id = $1 returning id`,
-    [id, patch.title ?? null, patch.groupId ?? null, patch.useWrap ?? null],
+    `update prompt_blocks set use_wrap = coalesce($2, use_wrap), updated_at = now() where id = $1 returning id`,
+    [id, patch.useWrap ?? null],
   );
   return rows.length > 0;
 }
 
-export async function deleteBlock(id: number): Promise<void> {
-  await query("delete from prompt_blocks where id = $1", [id]);
+/** 블록의 항목을 모두 지운다(비우기). */
+export async function clearBlock(id: number): Promise<boolean> {
+  const rows = await query(
+    `with del as (delete from prompt_items where block_id = $1)
+     update prompt_blocks set updated_at = now() where id = $1 returning id`,
+    [id],
+  );
+  return rows.length > 0;
 }
 
 // 항목을 바꾸면 블록의 updated_at 도 같은 문장에서 갱신한다(DB 왕복 1회).
@@ -209,6 +208,27 @@ export async function updateItem(id: number, text: string): Promise<Item | null>
      )
      select id::int, text from upd`,
     [id, text],
+  );
+  return item ?? null;
+}
+
+/** 항목을 다른 블록(프로젝트)의 맨 아래로 옮긴다. */
+export async function moveItem(id: number, blockId: number): Promise<Item | null> {
+  const [item] = await query<Item>(
+    `with old as (
+       select block_id from prompt_items where id = $1
+     ), upd as (
+       update prompt_items set
+         block_id = $2,
+         position = (select coalesce(max(position), 0) + 1 from prompt_items where block_id = $2)
+       where id = $1 and exists (select 1 from prompt_blocks where id = $2)
+       returning id, text
+     ), touch as (
+       update prompt_blocks set updated_at = now()
+       where exists (select 1 from upd) and (id = $2 or id in (select block_id from old))
+     )
+     select id::int, text from upd`,
+    [id, blockId],
   );
   return item ?? null;
 }

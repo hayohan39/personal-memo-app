@@ -9,12 +9,12 @@ export type BoardActions = {
   createGroup: (name: string) => void;
   updateGroup: (id: number, patch: { name?: string; prefix?: string; suffix?: string }) => void;
   deleteGroup: (id: number) => void;
-  createBlock: (groupId: number) => void;
-  updateBlock: (id: number, patch: { title?: string; groupId?: number; useWrap?: boolean }) => void;
-  deleteBlock: (id: number) => void;
+  setUseWrap: (blockId: number, useWrap: boolean) => void;
+  clearBlock: (blockId: number) => void;
   addItem: (blockId: number, text: string) => void;
   updateItem: (blockId: number, itemId: number, text: string) => void;
   deleteItem: (blockId: number, itemId: number) => void;
+  moveItem: (blockId: number, itemId: number, groupId: number) => void;
   copy: (text: string) => void;
   notify: (text: string) => void;
 };
@@ -28,12 +28,12 @@ type Props = {
   actions: BoardActions;
 };
 
-/** 프로젝트(드롭다운으로 선택)별 프롬프트 블록. */
+/** 프로젝트(드롭다운으로 선택)와 그 프로젝트의 프롬프트 블록 하나. */
 export function ProjectBoard({ groups, blocks, selected, onSelect, focusBlockId, actions }: Props) {
   const [adding, setAdding] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const group = groups.find((g) => g.id === selected) ?? null;
-  const visible = group ? blocks.filter((b) => b.groupId === group.id) : [];
+  const block = group ? blocks.find((b) => b.groupId === group.id) : undefined;
 
   return (
     <section className="prompts">
@@ -66,7 +66,7 @@ export function ProjectBoard({ groups, blocks, selected, onSelect, focusBlockId,
             {group ? null : <option value="">프로젝트를 만들어 주세요</option>}
             {groups.map((g) => (
               <option key={g.id} value={g.id}>
-                {g.name} ({blocks.filter((b) => b.groupId === g.id).length})
+                {g.name}
               </option>
             ))}
           </select>
@@ -91,7 +91,7 @@ export function ProjectBoard({ groups, blocks, selected, onSelect, focusBlockId,
         <ProjectSettings
           key={group.id}
           group={group}
-          blockCount={visible.length}
+          itemCount={block?.items.length ?? 0}
           onSave={(patch) => actions.updateGroup(group.id, patch)}
           onDelete={() => {
             setSettingsOpen(false);
@@ -100,45 +100,25 @@ export function ProjectBoard({ groups, blocks, selected, onSelect, focusBlockId,
         />
       ) : null}
 
-      {group ? (
-        <>
-          <div className="group-bar">
-            <button type="button" className="btn primary" onClick={() => actions.createBlock(group.id)}>
-              + 새 블록
-            </button>
-            {group.prefix.trim() || group.suffix.trim() ? (
-              <span className="muted small">앞·뒤 문구 설정됨</span>
-            ) : null}
-          </div>
-
-          {visible.length === 0 ? (
-            <p className="empty">
-              블록이 없어요. <b>+ 새 블록</b>을 눌러 세션에 보낼 할 일을 모아 보세요.
-            </p>
-          ) : (
-            visible.map((block) => (
-              <BlockCard
-                key={block.id}
-                block={block}
-                group={group}
-                groups={groups}
-                focus={block.id === focusBlockId}
-                onTitle={(title) => actions.updateBlock(block.id, { title })}
-                onUseWrap={(useWrap) => actions.updateBlock(block.id, { useWrap })}
-                onMove={(groupId) => {
-                  actions.updateBlock(block.id, { groupId });
-                  const target = groups.find((g) => g.id === groupId);
-                  actions.notify(`"${target?.name ?? "다른 프로젝트"}"(으)로 옮겼어요`);
-                }}
-                onDelete={() => actions.deleteBlock(block.id)}
-                onAddItem={(text) => actions.addItem(block.id, text)}
-                onUpdateItem={(itemId, text) => actions.updateItem(block.id, itemId, text)}
-                onDeleteItem={(itemId) => actions.deleteItem(block.id, itemId)}
-                onCopy={actions.copy}
-              />
-            ))
-          )}
-        </>
+      {group && block ? (
+        <BlockCard
+          key={block.id}
+          block={block}
+          group={group}
+          groups={groups}
+          focus={block.id === focusBlockId}
+          onUseWrap={(useWrap) => actions.setUseWrap(block.id, useWrap)}
+          onClear={() => actions.clearBlock(block.id)}
+          onAddItem={(text) => actions.addItem(block.id, text)}
+          onUpdateItem={(itemId, text) => actions.updateItem(block.id, itemId, text)}
+          onDeleteItem={(itemId) => actions.deleteItem(block.id, itemId)}
+          onMoveItem={(itemId, groupId) => {
+            actions.moveItem(block.id, itemId, groupId);
+            const target = groups.find((g) => g.id === groupId);
+            actions.notify(`"${target?.name ?? "다른 프로젝트"}"(으)로 옮겼어요`);
+          }}
+          onCopy={actions.copy}
+        />
       ) : (
         <p className="empty">프로젝트를 먼저 만들어 주세요. 프로젝트별로 나눠 두면 찾기 쉬워요.</p>
       )}
@@ -148,13 +128,13 @@ export function ProjectBoard({ groups, blocks, selected, onSelect, focusBlockId,
 
 type SettingsProps = {
   group: Group;
-  blockCount: number;
+  itemCount: number;
   onSave: (patch: { name?: string; prefix?: string; suffix?: string }) => void;
   onDelete: () => void;
 };
 
 /** 프로젝트 이름과 전체 복사 앞·뒤 문구. 입력을 멈추면 자동 저장. */
-function ProjectSettings({ group, blockCount, onSave, onDelete }: SettingsProps) {
+function ProjectSettings({ group, itemCount, onSave, onDelete }: SettingsProps) {
   const [name, setName] = useState(group.name);
   const [prefix, setPrefix] = useState(group.prefix);
   const [suffix, setSuffix] = useState(group.suffix);
@@ -213,8 +193,8 @@ function ProjectSettings({ group, blockCount, onSave, onDelete }: SettingsProps)
           className="link danger"
           onClick={() => {
             const message =
-              blockCount > 0
-                ? `"${group.name}" 프로젝트와 안의 블록 ${blockCount}개를 모두 삭제할까요?`
+              itemCount > 0
+                ? `"${group.name}" 프로젝트와 항목 ${itemCount}개를 모두 삭제할까요?`
                 : `"${group.name}" 프로젝트를 삭제할까요?`;
             if (window.confirm(message)) onDelete();
           }}

@@ -159,10 +159,23 @@ export function MemoApp({ initial, initialTab, initialGroup }: Props) {
 
   const actions: BoardActions = {
     createGroup: (name) => {
+      // 프로젝트와 그 블록(프로젝트마다 하나)을 함께 만든다.
       const id = nextTempId();
-      setState((s) => ({ ...s, groups: [...s.groups, { id, name, prefix: "", suffix: "" }] }));
-      enqueue(() => api<Group>("POST", "/api/groups", { name }).then(created(id)));
+      const blockId = nextTempId();
+      const block: Block = { id: blockId, groupId: id, useWrap: true, updatedAt: new Date().toISOString(), items: [] };
+      setState((s) => ({
+        ...s,
+        groups: [...s.groups, { id, name, prefix: "", suffix: "" }],
+        blocks: [...s.blocks, block],
+      }));
+      enqueue(() =>
+        api<{ group: Group; block: Block }>("POST", "/api/groups", { name }).then((res) => {
+          created(id)(res.group);
+          created(blockId)(res.block);
+        }),
+      );
       selectGroup(id);
+      setFocusBlockId(blockId);
     },
     updateGroup: (id, patch) => {
       setState((s) => ({ ...s, groups: s.groups.map((g) => (g.id === id ? { ...g, ...patch } : g)) }));
@@ -178,25 +191,13 @@ export function MemoApp({ initial, initialTab, initialGroup }: Props) {
       }));
       enqueue(() => api("DELETE", `/api/groups/${realId(id)}`));
     },
-    createBlock: (groupId) => {
-      const id = nextTempId();
-      const block: Block = { id, groupId, title: "", useWrap: true, updatedAt: new Date().toISOString(), items: [] };
-      setState((s) => ({ ...s, blocks: [block, ...s.blocks] }));
-      setFocusBlockId(id);
-      enqueue(() => api<Block>("POST", "/api/blocks", { groupId: realId(groupId) }).then(created(id)));
+    setUseWrap: (blockId, useWrap) => {
+      setState((s) => mapBlock(s, blockId, (b) => ({ ...b, useWrap })));
+      enqueue(() => api("PATCH", `/api/blocks/${realId(blockId)}`, { useWrap }));
     },
-    updateBlock: (id, patch) => {
-      setState((s) => mapBlock(s, id, (b) => ({ ...b, ...patch })));
-      enqueue(() =>
-        api("PATCH", `/api/blocks/${realId(id)}`, {
-          ...patch,
-          groupId: patch.groupId === undefined ? undefined : realId(patch.groupId),
-        }),
-      );
-    },
-    deleteBlock: (id) => {
-      setState((s) => ({ ...s, blocks: s.blocks.filter((b) => b.id !== id) }));
-      enqueue(() => api("DELETE", `/api/blocks/${realId(id)}`));
+    clearBlock: (blockId) => {
+      setState((s) => mapBlock(s, blockId, (b) => ({ ...b, items: [] })));
+      enqueue(() => api("DELETE", `/api/blocks/${realId(blockId)}/items`));
     },
     addItem: (blockId, text) => {
       const id = nextTempId();
@@ -212,6 +213,17 @@ export function MemoApp({ initial, initialTab, initialGroup }: Props) {
     deleteItem: (blockId, itemId) => {
       setState((s) => mapBlock(s, blockId, (b) => ({ ...b, items: b.items.filter((i) => i.id !== itemId) })));
       enqueue(() => api("DELETE", `/api/items/${realId(itemId)}`));
+    },
+    moveItem: (blockId, itemId, groupId) => {
+      const target = state.blocks.find((b) => b.groupId === groupId);
+      if (!target) return;
+      setState((s) => {
+        const item = s.blocks.find((b) => b.id === blockId)?.items.find((i) => i.id === itemId);
+        if (!item) return s;
+        const removed = mapBlock(s, blockId, (b) => ({ ...b, items: b.items.filter((i) => i.id !== itemId) }));
+        return mapBlock(removed, target.id, (b) => ({ ...b, items: [...b.items, item] }));
+      });
+      enqueue(() => api("PATCH", `/api/items/${realId(itemId)}`, { blockId: realId(target.id) }));
     },
     copy: (text) =>
       copyText(text)

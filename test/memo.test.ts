@@ -73,38 +73,57 @@ describe.skipIf(!url)("memo 데이터 계층 (실제 DB)", () => {
     expect(nextWeek[0]).toMatchObject({ periodStart: "2026-10-12", firstPeriod: "2026-10-05" });
   });
 
-  it("그룹 → 블록 → 항목을 만들고 고치고 지운다", async () => {
-    const group = await memo.createGroup("project-a");
-    const block = await memo.createBlock(group.id, "로그인");
-    expect(block).not.toBeNull();
-    const one = await memo.createItem(block!.id, "폼 만들기");
-    await memo.createItem(block!.id, "검증 추가");
+  it("프로젝트를 만들면 블록이 하나 생기고, 항목을 만들고 고치고 지운다", async () => {
+    const { group, block } = await memo.createGroup("project-a");
+    expect(block).toMatchObject({ groupId: group.id, useWrap: true, items: [] });
+    const one = await memo.createItem(block.id, "폼 만들기");
+    await memo.createItem(block.id, "검증 추가");
     await memo.updateItem(one!.id, "폼 만들기 (모바일)");
 
     let blocks = (await memo.listBlocks()).filter((b) => b.groupId === group.id);
+    expect(blocks).toHaveLength(1);
     expect(blocks[0].items.map((i) => i.text)).toEqual(["폼 만들기 (모바일)", "검증 추가"]);
 
     await memo.deleteItem(one!.id);
-    await memo.updateBlock(block!.id, { title: "로그인 v2" });
     blocks = (await memo.listBlocks()).filter((b) => b.groupId === group.id);
-    expect(blocks[0]).toMatchObject({ title: "로그인 v2", items: [{ text: "검증 추가" }] });
+    expect(blocks[0].items.map((i) => i.text)).toEqual(["검증 추가"]);
 
-    // 없는 그룹으로는 만들 수 없다
-    expect(await memo.createBlock(999_999)).toBeNull();
+    // 비우기
+    expect(await memo.clearBlock(block.id)).toBe(true);
+    blocks = (await memo.listBlocks()).filter((b) => b.groupId === group.id);
+    expect(blocks[0].items).toEqual([]);
+    expect(await memo.clearBlock(999_999)).toBe(false);
 
-    // 그룹을 지우면 블록도 같이
+    // 프로젝트를 지우면 블록도 같이
     await memo.deleteGroup(group.id);
-    expect((await memo.listBlocks()).some((b) => b.id === block!.id)).toBe(false);
+    expect((await memo.listBlocks()).some((b) => b.id === block.id)).toBe(false);
+  });
+
+  it("항목을 다른 프로젝트 블록의 맨 아래로 옮긴다", async () => {
+    const a = await memo.createGroup("move-a");
+    const b = await memo.createGroup("move-b");
+    const x = await memo.createItem(a.block.id, "옮길 항목");
+    await memo.createItem(a.block.id, "남을 항목");
+    await memo.createItem(b.block.id, "원래 있던 항목");
+
+    expect(await memo.moveItem(x!.id, b.block.id)).toMatchObject({ text: "옮길 항목" });
+    const blocks = await memo.listBlocks();
+    expect(blocks.find((bl) => bl.id === a.block.id)?.items.map((i) => i.text)).toEqual(["남을 항목"]);
+    expect(blocks.find((bl) => bl.id === b.block.id)?.items.map((i) => i.text)).toEqual([
+      "원래 있던 항목",
+      "옮길 항목",
+    ]);
+    // 없는 블록으로는 옮기지 않는다
+    expect(await memo.moveItem(x!.id, 999_999)).toBeNull();
   });
 
   it("loadState: 이월을 한 번에 처리하고 블록과 항목을 함께 돌려준다", async () => {
     const day = kst("2026-11-02T09:00:00"); // 월요일
     await memo.createTask("daily", "어제 못 한 일", kst("2026-11-01T09:00:00"));
     await memo.createTask("weekly", "지난주 못 한 일", kst("2026-10-28T09:00:00"));
-    const group = await memo.createGroup("load");
-    const block = await memo.createBlock(group.id, "b");
-    await memo.createItem(block!.id, "첫째");
-    await memo.createItem(block!.id, "둘째");
+    const { group, block } = await memo.createGroup("load");
+    await memo.createItem(block.id, "첫째");
+    await memo.createItem(block.id, "둘째");
 
     const state = await memo.loadState(day);
     expect(state.today).toBe("2026-11-02");
@@ -112,10 +131,10 @@ describe.skipIf(!url)("memo 데이터 계층 (실제 DB)", () => {
     expect(state.daily.find((t) => t.text === "어제 못 한 일")).toMatchObject({ periodStart: "2026-11-02" });
     expect(state.weekly.find((t) => t.text === "지난주 못 한 일")).toMatchObject({ periodStart: "2026-11-02" });
     expect(state.daily.every((t) => t.kind === "daily")).toBe(true);
-    const loaded = state.blocks.find((b) => b.id === block!.id);
+    const loaded = state.blocks.find((b) => b.id === block.id);
     expect(loaded?.items.map((i) => i.text)).toEqual(["첫째", "둘째"]);
     expect(typeof loaded?.items[0].id).toBe("number");
-    expect(state.blocks.find((b) => b.groupId === group.id && b.id !== block!.id)).toBeUndefined();
+    expect(state.blocks.filter((b) => b.groupId === group.id)).toHaveLength(1);
   });
 
   it("할 일을 일간 ↔ 주간으로 옮기면 그쪽의 현재 기간으로 간다", async () => {
@@ -129,7 +148,7 @@ describe.skipIf(!url)("memo 데이터 계층 (실제 DB)", () => {
   });
 
   it("프로젝트 앞·뒤 문구와 블록 useWrap 을 저장한다", async () => {
-    const group = await memo.createGroup("wrap");
+    const { group, block } = await memo.createGroup("wrap");
     expect(group).toMatchObject({ prefix: "", suffix: "" });
     expect(await memo.updateGroup(group.id, { prefix: "앞" })).toMatchObject({ name: "wrap", prefix: "앞", suffix: "" });
     expect(await memo.updateGroup(group.id, { suffix: "뒤", name: "wrap2" })).toMatchObject({
@@ -137,10 +156,9 @@ describe.skipIf(!url)("memo 데이터 계층 (실제 DB)", () => {
       prefix: "앞",
       suffix: "뒤",
     });
-    const block = await memo.createBlock(group.id);
-    expect(block?.useWrap).toBe(true);
-    await memo.updateBlock(block!.id, { useWrap: false });
-    expect((await memo.listBlocks()).find((b) => b.id === block!.id)?.useWrap).toBe(false);
+    expect(block.useWrap).toBe(true);
+    await memo.updateBlock(block.id, { useWrap: false });
+    expect((await memo.listBlocks()).find((b) => b.id === block.id)?.useWrap).toBe(false);
   });
 
   it("메모를 만들고 고치고 지운다. 최근에 고친 것이 먼저 온다", async () => {
