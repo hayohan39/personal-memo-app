@@ -56,9 +56,8 @@ export function MonthCalendar({ today, weekStart }: Props) {
         </thead>
         <tbody>
           {weeks.map((days) => {
-            const thisWeek = days[0] === weekStart;
             return (
-              <tr key={days[0]} className={thisWeek ? "this-week" : undefined}>
+              <tr key={days[0]}>
                 {days.map((d) => {
                   const classes = [
                     Number(d.slice(5, 7)) !== month + 1 ? "other" : "",
