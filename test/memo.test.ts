@@ -36,6 +36,10 @@ describe.skipIf(!url)("memo 데이터 계층 (실제 DB)", () => {
     await client.end();
   });
 
+  it("빈 \"기본\" 프로젝트는 마이그레이션으로 지워진다", async () => {
+    expect((await memo.listGroups()).map((g) => g.name)).not.toContain("기본");
+  });
+
   // 한국 시간 기준 시각을 만든다.
   const kst = (s: string) => new Date(`${s}+09:00`);
 

@@ -35,6 +35,18 @@ export function ProjectBoard({ groups, blocks, selected, onSelect, focusBlockId,
   const group = groups.find((g) => g.id === selected) ?? null;
   const block = group ? blocks.find((b) => b.groupId === group.id) : undefined;
 
+  const confirmDelete = () => {
+    if (!group) return;
+    const count = block?.items.length ?? 0;
+    const message =
+      count > 0
+        ? `"${group.name}" 프로젝트와 항목 ${count}개를 모두 삭제할까요?`
+        : `"${group.name}" 프로젝트를 삭제할까요?`;
+    if (!window.confirm(message)) return;
+    setSettingsOpen(false);
+    actions.deleteGroup(group.id);
+  };
+
   return (
     <section className="prompts">
       <div className="project-bar">
@@ -71,8 +83,8 @@ export function ProjectBoard({ groups, blocks, selected, onSelect, focusBlockId,
             ))}
           </select>
         )}
-        <button type="button" className="btn" onClick={() => setAdding(true)}>
-          + 프로젝트
+        <button type="button" className="btn" onClick={() => setAdding(true)} title="새 프로젝트 만들기">
+          + 추가
         </button>
         {group ? (
           <button
@@ -85,18 +97,18 @@ export function ProjectBoard({ groups, blocks, selected, onSelect, focusBlockId,
             설정
           </button>
         ) : null}
+        {group ? (
+          <button type="button" className="btn danger" onClick={confirmDelete} title="이 프로젝트 삭제">
+            삭제
+          </button>
+        ) : null}
       </div>
 
       {group && settingsOpen ? (
         <ProjectSettings
           key={group.id}
           group={group}
-          itemCount={block?.items.length ?? 0}
           onSave={(patch) => actions.updateGroup(group.id, patch)}
-          onDelete={() => {
-            setSettingsOpen(false);
-            actions.deleteGroup(group.id);
-          }}
         />
       ) : null}
 
@@ -128,13 +140,11 @@ export function ProjectBoard({ groups, blocks, selected, onSelect, focusBlockId,
 
 type SettingsProps = {
   group: Group;
-  itemCount: number;
   onSave: (patch: { name?: string; prefix?: string; suffix?: string }) => void;
-  onDelete: () => void;
 };
 
 /** 프로젝트 이름과 전체 복사 앞·뒤 문구. 입력을 멈추면 자동 저장. */
-function ProjectSettings({ group, itemCount, onSave, onDelete }: SettingsProps) {
+function ProjectSettings({ group, onSave }: SettingsProps) {
   const [name, setName] = useState(group.name);
   const [prefix, setPrefix] = useState(group.prefix);
   const [suffix, setSuffix] = useState(group.suffix);
@@ -185,23 +195,7 @@ function ProjectSettings({ group, itemCount, onSave, onDelete }: SettingsProps) 
           onBlur={suffixSave.flush}
         />
       </label>
-      <div className="settings-foot">
-        <span className="muted small">자동 저장돼요</span>
-        <span className="spacer" />
-        <button
-          type="button"
-          className="link danger"
-          onClick={() => {
-            const message =
-              itemCount > 0
-                ? `"${group.name}" 프로젝트와 항목 ${itemCount}개를 모두 삭제할까요?`
-                : `"${group.name}" 프로젝트를 삭제할까요?`;
-            if (window.confirm(message)) onDelete();
-          }}
-        >
-          프로젝트 삭제
-        </button>
-      </div>
+      <p className="muted small settings-foot">자동 저장돼요</p>
     </div>
   );
 }
