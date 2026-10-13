@@ -22,7 +22,10 @@ Claude 개발 todo 블록 정리와 일간/주간 todo 관리를 위한 개인 �
 2. 요청이 모호하거나 **인프라/비용/외부 서비스가 새로 필요한** 결정이면 구현 전에 먼저
    묻는다(아래 "인프라 결정" 참고). 그 외에는 합리적으로 판단해 진행하고 PR 에 적는다.
 3. 구현한다. 한 PR 에 한 목적. 무관한 리팩터링은 하지 않는다.
-4. **push 전에 반드시** `npm run check` (lint → typecheck → test → build) 를 통과시킨다.
+4. **push 전에 diff 를 스스로 다듬는다**: `.github/review/quality.md` 기준(덧붙임·재사용·단순화·일관성·빈틈)으로
+   `git diff origin/main...HEAD` 를 한 번 훑는다. 세션에 `/simplify` 스킬이 있으면 그걸 써도 된다.
+   CI 뒤의 품질 리뷰는 안전망이다 — 거기서 지적이 적을수록 좋다.
+   그리고 **반드시** `npm run check` (lint → typecheck → test → build) 를 통과시킨다.
    DB 를 건드렸으면 로컬 Postgres 에 `npm run migrate` 도 돌려 본다(아래 참고).
 5. 커밋 메시지는 Conventional Commits, 제목은 한국어 가능: `feat: 할 일 목록 추가`.
 6. push 후 **PR 을 만든다**. 본문은 `.github/pull_request_template.md` 형식으로 파일에 쓰고:
@@ -36,6 +39,8 @@ Claude 개발 todo 블록 정리와 일간/주간 todo 관리를 위한 개인 �
    (merge 가 곧 프로덕션 배포이므로 사람이 누르는 것이 이 프로세스의 게이트다.)
 
 PR 이 이미 열려 있는 브랜치에서 추가 요청을 받으면 같은 브랜치에 커밋을 더한다.
+그 전에 `git pull origin <브랜치>` — CI 가 `[claude-refine]`·`[claude-autofix]` 커밋을 더했을 수 있다.
+품질 리뷰 코멘트(🧹)의 **제안**을 사용자가 반영해 달라고 하면 같은 브랜치에서 고친다.
 
 > **GitHub CLI 주의**: 클라우드 세션의 GitHub 프록시는 GraphQL 을 막는다. `gh pr create`,
 > `gh pr list/checks/view`, `gh workflow run` 은 403 이 난다. `scripts/gh.mjs`(REST)나
@@ -53,6 +58,7 @@ PR 이 이미 열려 있는 브랜치에서 추가 요청을 받으면 같은 �
 PR 생성/push ─► ci.yml
                  ├ test     lint · typecheck · test · 빈 Postgres 에 마이그레이션 · build
                  ├ preview  Neon 브랜치(프로덕션 복제)에 마이그레이션 → Vercel 프리뷰 → PR 코멘트
+                 ├ refine   위가 통과하면 Claude 품질 리뷰 → 작은 정리는 [claude-refine] 커밋, 큰 것은 제안 (push 당 1회)
                  └ autofix  위가 실패하면 Claude 가 고쳐서 [claude-autofix] 커밋 (PR 당 최대 3회)
              ─► claude-review.yml   PR 이 열릴 때 자동 리뷰 코멘트
 PR 코멘트 @claude ─► claude-mention.yml  지시대로 수정
