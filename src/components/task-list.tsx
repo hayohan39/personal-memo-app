@@ -1,6 +1,6 @@
 "use client";
 
-import type { Ref } from "react";
+import type { ReactNode, Ref } from "react";
 import type { Task } from "@/lib/memo";
 import { carryLabel, type TaskKind } from "@/lib/period";
 import { EditableText } from "./editable-text";
@@ -8,7 +8,8 @@ import { QuickInput } from "./quick-input";
 
 type Props = {
   kind: TaskKind;
-  title: string;
+  /** 제목 자리에 들어갈 내용(오늘/이번 주 전환 토글) */
+  header: ReactNode;
   subtitle: string;
   tasks: Task[];
   inputRef?: Ref<HTMLTextAreaElement>;
@@ -19,7 +20,7 @@ type Props = {
   onMove: (task: Task) => void;
 };
 
-export function TaskList({ kind, title, subtitle, tasks, inputRef, onAdd, onUpdate, onDelete, onMove }: Props) {
+export function TaskList({ kind, header, subtitle, tasks, inputRef, onAdd, onUpdate, onDelete, onMove }: Props) {
   // 미완료가 위, 완료는 아래로.
   const sorted = [...tasks.filter((t) => !t.done), ...tasks.filter((t) => t.done)];
   const left = tasks.filter((t) => !t.done).length;
@@ -27,12 +28,12 @@ export function TaskList({ kind, title, subtitle, tasks, inputRef, onAdd, onUpda
   return (
     <section className="card">
       <header className="card-head">
-        <h2>{title}</h2>
-        <span className="muted small">{subtitle}</span>
+        {header}
         <span className="count" aria-label={`남은 할 일 ${left}개`}>
           {left}/{tasks.length}
         </span>
       </header>
+      <p className="muted small task-sub">{subtitle}</p>
       <QuickInput
         placeholder={kind === "daily" ? "오늘 할 일 입력 후 +" : "이번 주 할 일 입력 후 +"}
         ref={inputRef}

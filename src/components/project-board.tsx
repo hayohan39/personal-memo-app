@@ -66,7 +66,7 @@ export function ProjectBoard({ groups, blocks, selected, onSelect, focusBlockId,
             {group ? null : <option value="">프로젝트를 만들어 주세요</option>}
             {groups.map((g) => (
               <option key={g.id} value={g.id}>
-                {g.name}
+                {g.name} ({blocks.find((b) => b.groupId === g.id)?.items.length ?? 0}개)
               </option>
             ))}
           </select>

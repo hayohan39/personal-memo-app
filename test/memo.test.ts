@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { DEFAULT_SUFFIX } from "@/lib/copy";
 
 // 실제 Postgres 가 있을 때만 돈다(CI 는 TEST_DATABASE_URL 을 준다).
 const url = process.env.TEST_DATABASE_URL;
@@ -153,8 +154,12 @@ describe.skipIf(!url)("memo 데이터 계층 (실제 DB)", () => {
 
   it("프로젝트 앞·뒤 문구와 블록 useWrap 을 저장한다", async () => {
     const { group, block } = await memo.createGroup("wrap");
-    expect(group).toMatchObject({ prefix: "", suffix: "" });
-    expect(await memo.updateGroup(group.id, { prefix: "앞" })).toMatchObject({ name: "wrap", prefix: "앞", suffix: "" });
+    expect(group).toMatchObject({ prefix: "", suffix: DEFAULT_SUFFIX });
+    expect(await memo.updateGroup(group.id, { prefix: "앞" })).toMatchObject({
+      name: "wrap",
+      prefix: "앞",
+      suffix: DEFAULT_SUFFIX,
+    });
     expect(await memo.updateGroup(group.id, { suffix: "뒤", name: "wrap2" })).toMatchObject({
       name: "wrap2",
       prefix: "앞",
