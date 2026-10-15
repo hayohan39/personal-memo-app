@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { logout } from "@/app/login/actions";
+import { DEFAULT_SUFFIX } from "@/lib/copy";
 import type { Block, Group, Item, MemoState, Note, Task } from "@/lib/memo";
 import { formatDay, formatWeek, type TaskKind } from "@/lib/period";
 import { GROUP_COOKIE, TAB_COOKIE, type Tab } from "@/lib/prefs";
@@ -20,6 +21,7 @@ type Props = { initial: MemoState; initialTab: Tab; initialGroup: number | null 
 export function MemoApp({ initial, initialTab, initialGroup }: Props) {
   const [state, setState] = useState(initial);
   const [tab, setTab] = useState<Tab>(initialTab);
+  const [taskKind, setTaskKind] = useState<TaskKind>("daily");
   const [selectedGroup, setSelectedGroup] = useState<number | null>(
     initial.groups.some((g) => g.id === initialGroup) ? initialGroup : (initial.groups[0]?.id ?? null),
   );
@@ -165,7 +167,7 @@ export function MemoApp({ initial, initialTab, initialGroup }: Props) {
       const block: Block = { id: blockId, groupId: id, useWrap: true, updatedAt: new Date().toISOString(), items: [] };
       setState((s) => ({
         ...s,
-        groups: [...s.groups, { id, name, prefix: "", suffix: "" }],
+        groups: [...s.groups, { id, name, prefix: "", suffix: DEFAULT_SUFFIX }],
         blocks: [...s.blocks, block],
       }));
       enqueue(() =>
@@ -289,22 +291,33 @@ export function MemoApp({ initial, initialTab, initialGroup }: Props) {
       <div className="panes">
         <div className="pane pane-todo">
           <MonthCalendar today={state.today} weekStart={state.weekStart} />
+          {/* 오늘 / 이번 주는 한 카드에서 토글로 전환한다 */}
           <TaskList
-            kind="daily"
-            title="오늘"
-            subtitle="자정에 남은 일은 내일로"
-            tasks={state.daily}
+            key={taskKind}
+            kind={taskKind}
+            header={
+              <div className="seg" role="tablist" aria-label="할 일 기간">
+                {(["daily", "weekly"] as const).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    role="tab"
+                    aria-selected={taskKind === k}
+                    onClick={() => setTaskKind(k)}
+                  >
+                    {k === "daily" ? "오늘" : "이번 주"}
+                    <span className="seg-count">{state[k].filter((t) => !t.done).length}</span>
+                  </button>
+                ))}
+              </div>
+            }
+            subtitle={
+              taskKind === "daily"
+                ? "자정에 남은 일은 내일로"
+                : `${formatWeek(state.weekStart)} · 일요일 자정에 다음 주로`
+            }
+            tasks={state[taskKind]}
             inputRef={dailyInput}
-            onAdd={addTask}
-            onUpdate={updateTask}
-            onDelete={deleteTask}
-            onMove={moveTask}
-          />
-          <TaskList
-            kind="weekly"
-            title="이번 주"
-            subtitle={`${formatWeek(state.weekStart)} · 일요일 자정에 다음 주로`}
-            tasks={state.weekly}
             onAdd={addTask}
             onUpdate={updateTask}
             onDelete={deleteTask}
