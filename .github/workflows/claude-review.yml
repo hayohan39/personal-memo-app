@@ -29,7 +29,27 @@ jobs:
         with:
           fetch-depth: 0
 
+      # claude-code-action 은 App 토큰을 받을 때 실행 중인 워크플로(이 파일)가 기본 브랜치와 같은지 검사하고,
+      # 다르면 아무것도 남기지 않고 '성공' 으로 끝난다. 리뷰가 빠진 이유를 PR 에서 알 수 있게 코멘트를 남긴다.
+      - name: Workflow guard
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if git diff --quiet "origin/$BASE...HEAD" -- .github/workflows/claude-review.yml; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "proceed=false" >> "$GITHUB_OUTPUT"
+          body=$'<!-- claude-review-skipped -->\n### 🤖 Claude PR 리뷰 건너뜀\n\n이 PR 은 `.github/workflows/claude-review.yml` 을 바꿔서 자동 리뷰를 건너뜁니다. Claude 실행기는 기본 브랜치와 같은 워크플로에서만 돌기 때문입니다 — merge 후 다음 PR 부터 다시 리뷰합니다. 지금 리뷰가 필요하면 `@claude 리뷰해줘` 로 코멘트하세요.'
+          # draft → ready 를 오가도 한 번만 남긴다.
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- claude-review-skipped -->"))) | .id' | head -n1)
+          [ -n "$existing" ] || gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$body" >/dev/null
+
       - uses: anthropics/claude-code-action@v1
+        if: steps.guard.outputs.proceed == 'true'
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
