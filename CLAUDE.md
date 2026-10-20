@@ -58,7 +58,7 @@ PR 이 이미 열려 있는 브랜치에서 추가 요청을 받으면 같은 �
 PR 생성/push ─► ci.yml
                  ├ test     lint · typecheck · test · 빈 Postgres 에 마이그레이션 · build
                  ├ preview  Neon 브랜치(프로덕션 복제)에 마이그레이션 → Vercel 프리뷰 → PR 코멘트
-                 ├ refine   위가 통과하면 Claude 품질 리뷰 → 작은 정리는 [claude-refine] 커밋, 큰 것은 제안 (push 당 1회)
+                 ├ refine   위가 통과하면 Claude 품질 리뷰 → 작은 정리는 [claude-refine] 커밋, 큰 것은 제안 (PR 당 1회)
                  └ autofix  위가 실패하면 Claude 가 고쳐서 [claude-autofix] 커밋 (PR 당 최대 3회)
              ─► claude-review.yml   PR 이 열릴 때 자동 리뷰 코멘트
 PR 코멘트 @claude ─► claude-mention.yml  지시대로 수정
