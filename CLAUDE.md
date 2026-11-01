@@ -22,9 +22,9 @@ Claude 개발 todo 블록 정리와 일간/주간 todo 관리를 위한 개인 �
 2. 요청이 모호하거나 **인프라/비용/외부 서비스가 새로 필요한** 결정이면 구현 전에 먼저
    묻는다(아래 "인프라 결정" 참고). 그 외에는 합리적으로 판단해 진행하고 PR 에 적는다.
 3. 구현한다. 한 PR 에 한 목적. 무관한 리팩터링은 하지 않는다.
-4. **push 전에 diff 를 스스로 다듬는다**: `.github/review/quality.md` 기준(덧붙임·재사용·단순화·일관성·빈틈)으로
-   `git diff origin/main...HEAD` 를 한 번 훑는다. 세션에 `/simplify` 스킬이 있으면 그걸 써도 된다.
-   CI 뒤의 품질 리뷰는 안전망이다 — 거기서 지적이 적을수록 좋다.
+4. **push 전에 diff 를 스스로 다듬는다** — CI 에는 품질 리뷰가 없어서 이 단계가 유일한 품질 점검이다.
+   `.github/review/quality.md` 를 읽고 그 기준(덧붙임·재사용·단순화·일관성·빈틈)으로 `git diff origin/main...HEAD` 를 훑어
+   바로 고칠 것은 고치고, 남길 것은 PR 본문에 적는다. 세션에 `/simplify` 스킬이 있으면 먼저 돌리고 표로 한 번 더 본다.
    그리고 **반드시** `npm run check` (lint → typecheck → test → build) 를 통과시킨다.
    DB 를 건드렸으면 로컬 Postgres 에 `npm run migrate` 도 돌려 본다(아래 참고).
 5. 커밋 메시지는 Conventional Commits, 제목은 한국어 가능: `feat: 할 일 목록 추가`.
@@ -32,15 +32,14 @@ Claude 개발 todo 블록 정리와 일간/주간 todo 관리를 위한 개인 �
    `node scripts/gh.mjs pr-create --title "feat: ..." --body-file /tmp/pr.md`
    "무엇을 / 어떻게 확인했나 / 배포 영향" 을 비우지 않는다. 사용자는 휴대폰으로 PR 을
    볼 수 있다 — 무엇이 바뀌는지 첫 줄에서 알 수 있게 쓴다.
-7. PR 을 연 뒤 `node scripts/gh.mjs pr-watch` 로 CI 를 기다리고 결과(체크, 프리뷰 링크)를
-   사용자에게 한두 줄로 알린다. 실패하면 auto-fix 가 붙지만, 세션이 살아 있으면 직접 고쳐서
-   push 하는 편이 빠르다.
+7. PR 을 연 뒤 `node scripts/gh.mjs pr-watch` 로 CI 와 그 뒤의 Claude 리뷰를 기다리고 결과(체크, 프리뷰 링크, 리뷰 판정)를
+   사용자에게 한두 줄로 알린다. CI 가 실패하면 auto-fix 가 붙지만, 세션이 살아 있으면 직접 고쳐서
+   push 하는 편이 빠르다. 리뷰가 "수정 필요" 면 같은 브랜치에서 고쳐 push 한다.
 8. **merge 하지 않는다.** 사용자가 요청해도 "PR 에서 merge 버튼을 눌러 주세요" 라고 안내한다.
    (merge 가 곧 프로덕션 배포이므로 사람이 누르는 것이 이 프로세스의 게이트다.)
 
 PR 이 이미 열려 있는 브랜치에서 추가 요청을 받으면 같은 브랜치에 커밋을 더한다.
-그 전에 `git pull origin <브랜치>` — CI 가 `[claude-refine]`·`[claude-autofix]` 커밋을 더했을 수 있다.
-품질 리뷰 코멘트(🧹)의 **제안**을 사용자가 반영해 달라고 하면 같은 브랜치에서 고친다.
+그 전에 `git pull origin <브랜치>` — CI 가 `[claude-autofix]` 커밋을 더했을 수 있다.
 
 > **GitHub CLI 주의**: 클라우드 세션의 GitHub 프록시는 GraphQL 을 막는다. `gh pr create`,
 > `gh pr list/checks/view`, `gh workflow run` 은 403 이 난다. `scripts/gh.mjs`(REST)나
@@ -58,11 +57,13 @@ PR 이 이미 열려 있는 브랜치에서 추가 요청을 받으면 같은 �
 PR 생성/push ─► ci.yml
                  ├ test     lint · typecheck · test · 빈 Postgres 에 마이그레이션 · build
                  ├ preview  Neon 브랜치(프로덕션 복제)에 마이그레이션 → Vercel 프리뷰 → PR 코멘트
-                 ├ refine   위가 통과하면 Claude 품질 리뷰 → 작은 정리는 [claude-refine] 커밋, 큰 것은 제안 (PR 당 1회)
                  └ autofix  위가 실패하면 Claude 가 고쳐서 [claude-autofix] 커밋 (PR 당 최대 3회)
-             ─► claude-review.yml   PR 이 열릴 때 자동 리뷰 코멘트
+CI 완료 ─► claude-review.yml (main 의 코드로 실행)  CI 통과 시 Claude 리뷰 → PR 코멘트
+                 (PR 당 1회 — 통과하면 `ai-reviewed` 라벨. "수정 필요" 면 고친 다음 push 에서 다시 리뷰)
 PR 코멘트 @claude ─► claude-mention.yml  지시대로 수정
-merge ─► deploy.yml  프로덕션 마이그레이션 → Vercel 프로덕션 배포 → /api/health 확인 → PR 코멘트
+merge ─► ci.yml 의 test (merge 결과물을 한 번 더, 항상 전체 — 브랜치 보호가 "최신 main 포함" 을 요구하지 않아서)
+      ─► 통과하면 deploy.yml  프로덕션 마이그레이션 → Vercel 프로덕션 배포 → /api/health 확인 → PR 코멘트
+                              (문서만 바뀐 merge 는 배포하지 않음. test 가 실패하면 배포하지 않고 merge 된 PR 에 알림)
 PR 닫힘 ─► preview-cleanup.yml  Neon 프리뷰 브랜치 삭제
 ```
 
@@ -119,6 +120,7 @@ Vercel(배포)과 Neon(DB)은 고정이다. 그 밖의 것(인증, 파일 저장
 - 경로는 `path.join`, 임시 디렉터리는 `os.tmpdir()`. npm scripts 에 POSIX 전용 문법 금지.
 - 테스트를 지우거나 skip 해서 통과시키지 않는다. `eslint-disable` / `@ts-ignore` 로 덮지 않는다.
 - 사용자에게 보이는 문구는 한국어가 기본.
+- `ai-reviewed` 라벨은 건드리지 않는다(붙어 있으면 리뷰를 건너뛴다).
 - 개인용 앱이라도 쓰기 API 는 인증 없이 공개하지 않는다. 인증 방식이 아직 없으면 먼저 묻는다.
 
 ## 명령

@@ -7,7 +7,7 @@
 //   node scripts/gh.mjs pr-create --title "feat: ..." --body-file /tmp/body.md [--draft]
 //   node scripts/gh.mjs pr-list                       열린 PR + 각 PR 의 CI 상태
 //   node scripts/gh.mjs pr-status [<번호>]             체크 결과 + 프리뷰 코멘트 (번호 없으면 현재 브랜치)
-//   node scripts/gh.mjs pr-watch [<번호>]              체크가 끝날 때까지 기다린 뒤 pr-status
+//   node scripts/gh.mjs pr-watch [<번호>]              체크와 Claude 리뷰가 끝날 때까지 기다린 뒤 pr-status
 //   node scripts/gh.mjs deploys                       최근 main 배포 결과
 //   node scripts/gh.mjs dispatch <workflow.yml> [key=value ...]
 import { execFileSync } from 'node:child_process';
@@ -57,11 +57,19 @@ function prStatus(R, number) {
   const comments = api(`repos/${R}/issues/${number}/comments?per_page=100`);
   const preview = comments.findLast((c) => c.body.startsWith('<!-- preview-comment -->'));
   if (preview) console.log(`\n${preview.body.replace('<!-- preview-comment -->\n', '')}`);
-  const review = comments.findLast((c) => /merge 해도 됨|수정 필요/.test(c.body));
+  const review = comments.findLast((c) => c.body.startsWith('<!-- claude-review'));
   if (review) {
-    const verdict = review.body.match(/(✅ merge 해도 됨|✋ 수정 필요)/)?.[1];
-    if (verdict) console.log(`\nClaude 리뷰: ${verdict} (${review.html_url})`);
+    const verdict = review.body.match(/(✅ merge 해도 됨|✋ 수정 필요)/)?.[1] ?? '결과 없음';
+    const at = review.body.match(/sha=([0-9a-f]{7})/)?.[1];
+    console.log(`\nClaude 리뷰: ${verdict}${at ? ` — ${at} 기준` : ''} (${review.html_url})`);
   }
+}
+
+/** CI 뒤의 Claude 리뷰(claude-review.yml)가 이 커밋을 다 봤거나 볼 일이 없는가. */
+function reviewSettled(R, pr) {
+  if (pr.draft || pr.labels.some((l) => l.name === 'ai-reviewed')) return true; // draft 는 리뷰 안 함 · PR 당 1회
+  const comments = api(`repos/${R}/issues/${pr.number}/comments?per_page=100`);
+  return comments.some((c) => c.body.startsWith(`<!-- claude-review sha=${pr.head.sha} -->`));
 }
 
 const [command, ...rest] = process.argv.slice(2);
@@ -104,16 +112,26 @@ try {
     case 'pr-watch': {
       const number = positional[0] ?? currentPr(R);
       const deadline = Date.now() + 30 * 60_000;
+      let checksDoneAt = null;
       for (;;) {
-        const { head } = api(`repos/${R}/pulls/${number}`);
-        const list = checks(R, head.sha);
+        const pr = api(`repos/${R}/pulls/${number}`);
+        const list = checks(R, pr.head.sha);
         const pending = list.filter((c) => c.status !== 'completed');
-        if (list.length && !pending.length) break;
+        if (list.length && !pending.length) {
+          // CI 가 통과했으면 그 뒤에 도는 Claude 리뷰 코멘트까지 기다린다(실패면 리뷰는 돌지 않는다).
+          const failed = list.some((c) => !['success', 'skipped', 'neutral'].includes(c.conclusion));
+          if (failed || reviewSettled(R, pr)) break;
+          checksDoneAt ??= Date.now();
+          if (Date.now() - checksDoneAt > 10 * 60_000) {
+            console.log('CI 가 끝나고 10분이 지나도 Claude 리뷰가 없어 기다리기를 멈춥니다(CLAUDE_REVIEW=false 이거나 실행이 밀렸을 수 있음).');
+            break;
+          }
+        }
         if (Date.now() > deadline) {
           console.log('30분이 지나 기다리기를 멈춥니다.');
           break;
         }
-        process.stdout.write(`대기 중: ${pending.map((c) => c.name).join(', ') || '체크 시작 전'}\n`);
+        process.stdout.write(`대기 중: ${pending.map((c) => c.name).join(', ') || (list.length ? 'Claude 리뷰' : '체크 시작 전')}\n`);
         await new Promise((r) => setTimeout(r, 20_000));
       }
       prStatus(R, number);
@@ -128,8 +146,11 @@ try {
         break;
       }
       for (const run of runs) {
-        const mark = run.status !== 'completed' ? '⏳' : run.conclusion === 'success' ? '✅' : '❌';
-        console.log(`${mark} ${run.created_at.slice(0, 16).replace('T', ' ')} ${run.head_sha.slice(0, 7)} ${run.display_title}\n   ${run.html_url}`);
+        // ⏭️ = main 의 CI(test)가 실패·취소돼 배포하지 않음.
+        const mark = run.status !== 'completed' ? '⏳' : run.conclusion === 'success' ? '✅' : run.conclusion === 'skipped' ? '⏭️' : '❌';
+        // deploy.yml 은 CI 뒤에(workflow_run) 돌아 head_sha 가 그 순간의 main 이다 — 배포한 커밋은 실행 이름(run-name)에 있다.
+        const sha = run.display_title.match(/\b[0-9a-f]{40}\b/)?.[0] ?? run.head_sha;
+        console.log(`${mark} ${run.created_at.slice(0, 16).replace('T', ' ')} ${sha.slice(0, 7)} ${run.display_title}\n   ${run.html_url}`);
       }
       if (!runs.length) console.log('배포 기록 없음');
       break;
